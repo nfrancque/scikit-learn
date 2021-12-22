@@ -16,6 +16,8 @@ from pprint import pprint
 import numpy as np
 from scipy import linalg
 
+from fpgacluster.fpgacluster import fpga_sim
+
 from fxpmath import Fxp
 from fxpmath.callbacks import Callback
 
@@ -723,7 +725,8 @@ class FastICA(_ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator)
 def get_implementation(operation):
     IMPLEMENTATIONS = {
         # "mean" : mean_floating,
-        "mean" : mean_fixed,
+        # "mean" : mean_fixed,
+        "mean" : mean_fpga_sim,
         "whiten" : whiten_floating,
     }
     return IMPLEMENTATIONS[operation]
@@ -748,6 +751,21 @@ def mean_fixed(XT):
     as_fixed = to_fixed(XT, total_bits, fraction_bits)
     X_mean_fixed = as_fixed.mean(axis=-1)
     X_mean = to_float(X_mean_fixed)
+    print("HERE'S MY MEAN!")
+    pprint(X_mean)
+    return X_mean
+
+def mean_fpga_sim(XT):
+    total_bits = 24
+    fraction_bits = 18
+    args = {
+        "total_bits" : total_bits,
+        "fraction_bits" : fraction_bits,
+        "data" : XT,
+    }
+    X_mean = fpga_sim("mean", args)
+    print("HERE'S MY MEAN!")
+    pprint(X_mean)
     return X_mean
 
 def mean(XT):

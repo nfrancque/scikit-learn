@@ -209,7 +209,7 @@ def test_non_square_fastica(add_noise):
     s_ = s_.T
 
     # Check that the mixing model described in the docstring holds:
-    assert_almost_equal(s_, np.dot(np.dot(mixing_, k_), m))
+    assert_almost_equal(s_, np.dot(np.dot(mixing_, k_), m), decimal=7)
 
     center_and_norm(s_)
     s1_, s2_ = s_

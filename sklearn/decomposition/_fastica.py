@@ -11,8 +11,13 @@ Independent Component Analysis, by  Hyvarinen et al.
 
 import warnings
 
+from pprint import pprint
+
 import numpy as np
 from scipy import linalg
+
+from fxpmath import Fxp
+from fxpmath.callbacks import Callback
 
 from ..base import BaseEstimator, TransformerMixin, _ClassNamePrefixFeaturesOutMixin
 from ..exceptions import ConvergenceWarning
@@ -542,20 +547,8 @@ class FastICA(_ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator)
             )
 
         if self._whiten:
-            # Centering the features of X
-            X_mean = XT.mean(axis=-1)
-            XT -= X_mean[:, np.newaxis]
-
-            # Whitening and preprocessing by PCA
-            u, d, _ = linalg.svd(XT, full_matrices=False, check_finite=False)
-
-            del _
-            K = (u / d).T[:n_components]  # see (6.33) p.140
-            del u, d
-            X1 = np.dot(K, XT)
-            # see (13.6) p.267 Here X1 is white and data
-            # in X has been projected onto a subspace by PCA
-            X1 *= np.sqrt(n_samples)
+            X_mean = mean(XT)
+            X1, K = whiten(XT, X_mean, n_components, n_samples)
         else:
             # X must be casted to floats to avoid typing issues with numpy
             # 2.0 and the line below
@@ -726,3 +719,91 @@ class FastICA(_ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator)
     def _n_features_out(self):
         """Number of transformed output features."""
         return self.components_.shape[0]
+
+def get_implementation(operation):
+    IMPLEMENTATIONS = {
+        # "mean" : mean_floating,
+        "mean" : mean_fixed,
+        "whiten" : whiten_floating,
+    }
+    return IMPLEMENTATIONS[operation]
+
+def to_fixed(float_num, total_bits, fraction_bits):
+    return Fxp(float_num, signed=True, n_word=total_bits, n_frac=fraction_bits, callbacks=[fxp_callback],
+        rounding='trunc', overflow='saturate')
+
+def to_float(fixed_num):
+    ret = fixed_num.get_val()
+    ret = ret.astype(np.float64)
+
+    return ret
+
+def mean_floating(XT):
+    X_mean = XT.mean(axis=-1)
+    return X_mean
+
+def mean_fixed(XT):
+    total_bits = 18
+    fraction_bits = 12
+    as_fixed = to_fixed(XT, total_bits, fraction_bits)
+    X_mean_fixed = as_fixed.mean(axis=-1)
+    X_mean = to_float(X_mean_fixed)
+    return X_mean
+
+def mean(XT):
+    impl = get_implementation("mean")
+    X_mean = impl(XT)
+    return X_mean
+
+def whiten_floating(XT, X_mean, n_components, n_samples):
+    # Centering the features of X
+    XT -= X_mean[:, np.newaxis]
+
+    # Whitening and preprocessing by PCA
+    u, d, _ = linalg.svd(XT, full_matrices=False, check_finite=False)
+
+    del _
+    K = (u / d).T[:n_components]  # see (6.33) p.140
+    del u, d
+    X1 = np.dot(K, XT)
+    # see (13.6) p.267 Here X1 is white and data
+    # in X has been projected onto a subspace by PCA
+    X1 *= np.sqrt(n_samples)
+    return X1, K
+
+def whiten_fixed(XT, X_mean, n_components, n_samples):
+    pass
+
+def gen_fxp_handler(type):
+    def msg_printer(self):
+        pprint(self.__dict__)
+        assert False, f"Fxp {type}"
+    return msg_printer
+
+
+fxp_callback = Callback()
+fxp_callback.on_status_overflow = gen_fxp_handler("overflow")
+fxp_callback.on_status_underflow = gen_fxp_handler("underflow")
+
+def whiten(XT, X_mean, n_components, n_samples):
+    """Whiten the input.
+
+    Parameters
+    ----------
+    XT : The validated input sample matrix
+
+    n_components: The number of independent components in the input
+
+    n_samples: The number of samples of each channel present
+
+    Returns
+    -------
+    X1: The whitened matrix
+
+    K: Some constant I don't totally understand
+
+    X_mean: Decomposed mean of XT
+    """
+    impl = get_implementation("whiten")
+    X1, K = impl(XT, X_mean, n_components, n_samples)
+    return X1, K

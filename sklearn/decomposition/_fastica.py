@@ -756,8 +756,8 @@ def mean_fixed(XT):
     return X_mean
 
 def mean_fpga_sim(XT):
-    total_bits = 24
-    fraction_bits = 18
+    total_bits = 36
+    fraction_bits = 11
     args = {
         "total_bits" : total_bits,
         "fraction_bits" : fraction_bits,

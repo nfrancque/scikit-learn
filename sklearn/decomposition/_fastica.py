@@ -550,7 +550,9 @@ class FastICA(_ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator)
 
         if self._whiten:
             X_mean = mean(XT)
-            X1, K = whiten(XT, X_mean, n_components, n_samples)
+            # Centering the features of X
+            XT = center(XT, X_mean)
+            X1, K = whiten(XT, n_components, n_samples)
         else:
             # X must be casted to floats to avoid typing issues with numpy
             # 2.0 and the line below
@@ -724,10 +726,13 @@ class FastICA(_ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator)
 
 def get_implementation(operation):
     IMPLEMENTATIONS = {
-        # "mean" : mean_floating,
+        "mean" : mean_floating,
         # "mean" : mean_fixed,
-        "mean" : mean_fpga_sim,
+        # "mean" : mean_fpga_sim,
         "whiten" : whiten_floating,
+        # "center" : center_floating,
+        # "center" : center_fixed,
+        "center" : center_fpga_sim,
     }
     return IMPLEMENTATIONS[operation]
 
@@ -764,8 +769,6 @@ def mean_fpga_sim(XT):
         "data" : XT,
     }
     X_mean = fpga_sim("mean", args)
-    print("HERE'S MY MEAN!")
-    pprint(X_mean)
     return X_mean
 
 def mean(XT):
@@ -773,10 +776,36 @@ def mean(XT):
     X_mean = impl(XT)
     return X_mean
 
-def whiten_floating(XT, X_mean, n_components, n_samples):
-    # Centering the features of X
-    XT -= X_mean[:, np.newaxis]
+def center(XT, X_mean):
+    impl = get_implementation("center")
+    ret = XT = impl(XT, X_mean)
+    return ret
 
+def center_floating(XT, X_mean):
+    XT -= X_mean[:, np.newaxis]
+    return XT
+
+def center_fixed(XT, X_mean):
+    total_bits = 48
+    frac_bits = 27
+    XT = to_fixed(XT, total_bits, frac_bits)
+    X_mean = to_fixed(X_mean, total_bits, frac_bits)
+    XT -= X_mean[:, np.newaxis]
+    return to_float(XT)
+
+def center_fpga_sim(XT, X_mean):
+    total_bits = 48
+    fraction_bits = 27
+    args = {
+        "total_bits" : total_bits,
+        "fraction_bits" : fraction_bits,
+        "data" : XT,
+        "mean" : X_mean,
+    }
+    centered = fpga_sim("center", args)
+    return centered
+
+def whiten_floating(XT, n_components, n_samples):
     # Whitening and preprocessing by PCA
     u, d, _ = linalg.svd(XT, full_matrices=False, check_finite=False)
 
@@ -789,7 +818,7 @@ def whiten_floating(XT, X_mean, n_components, n_samples):
     X1 *= np.sqrt(n_samples)
     return X1, K
 
-def whiten_fixed(XT, X_mean, n_components, n_samples):
+def whiten_fixed(XT, n_components, n_samples):
     pass
 
 def gen_fxp_handler(type):
@@ -803,7 +832,7 @@ fxp_callback = Callback()
 fxp_callback.on_status_overflow = gen_fxp_handler("overflow")
 fxp_callback.on_status_underflow = gen_fxp_handler("underflow")
 
-def whiten(XT, X_mean, n_components, n_samples):
+def whiten(XT, n_components, n_samples):
     """Whiten the input.
 
     Parameters
@@ -823,5 +852,5 @@ def whiten(XT, X_mean, n_components, n_samples):
     X_mean: Decomposed mean of XT
     """
     impl = get_implementation("whiten")
-    X1, K = impl(XT, X_mean, n_components, n_samples)
+    X1, K = impl(XT, n_components, n_samples)
     return X1, K
